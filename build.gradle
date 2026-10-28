@@ -1,0 +1,5 @@
+// Compatibility entry point for the generated starter: Maven is the single build definition.
+// Run gradle build only if Gradle and Maven are installed; Eclipse should import pom.xml.
+tasks.register('build', Exec) {
+    commandLine 'cmd', '/c', 'mvn', '-Plambda', 'clean', 'verify'
+}

@@ -1,0 +1,13 @@
+# Generated builds, Eclipse metadata and local secrets must stay outside version control.
+/target/
+/.settings/
+/.classpath
+/.project
+/.aws-sam/
+/.gradle/
+/build/
+.env
+.env.*
+*.log
+samconfig.toml
+application-local.properties

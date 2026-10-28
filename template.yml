@@ -1,0 +1,66 @@
+# Deployment preparation only: this template does not create a database or deploy by itself.
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Member 3 approval, notification and audit backend with existing private MySQL
+Parameters:
+  DatabaseUrl:
+    Type: String
+    Description: JDBC URL for private RDS MySQL; enable TLS (sslMode=VERIFY_IDENTITY)
+    AllowedPattern: 'jdbc:mysql://.+'
+  DatabaseSecretArn:
+    Type: String
+    Description: Existing Secrets Manager secret containing username and password fields
+  SubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Private subnets with network access to the database
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Lambda security groups permitted by the database security group on TCP 3306
+  CorsOrigins:
+    Type: String
+    Default: http://localhost:5173
+    Description: Comma-separated exact frontend origins; replace for deployed frontend
+Resources:
+  ApprovalApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      EndpointConfiguration: REGIONAL
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          ThrottlingBurstLimit: 20
+          ThrottlingRateLimit: 10
+  LeaveManagementSystemAwsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: com.nexturn.lms.StreamLambdaHandler::handleRequest
+      Runtime: java21
+      CodeUri: target/leave-management-system-aws-0.0.1-SNAPSHOT-lambda-package.zip
+      MemorySize: 1024
+      Timeout: 30
+      ReservedConcurrentExecutions: 5
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+      VpcConfig:
+        SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+      Environment:
+        Variables:
+          DB_URL: !Ref DatabaseUrl
+          # CloudFormation resolves these at deployment; secret rotation requires a function configuration update.
+          DB_USERNAME: !Sub '{{resolve:secretsmanager:${DatabaseSecretArn}:SecretString:username}}'
+          DB_PASSWORD: !Sub '{{resolve:secretsmanager:${DatabaseSecretArn}:SecretString:password}}'
+          CORS_ORIGINS: !Ref CorsOrigins
+          JAVA_TOOL_OPTIONS: '-Duser.timezone=UTC'
+      Events:
+        ProxyResource:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApprovalApi
+            Path: /{proxy+}
+            Method: ANY
+Outputs:
+  ApiBaseUrl:
+    Description: Base URL; append /ping or /api/auth/login
+    Value: !Sub 'https://${ApprovalApi}.execute-api.${AWS::Region}.amazonaws.com/Prod'
