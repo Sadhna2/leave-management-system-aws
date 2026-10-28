@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.net.http.*;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import org.springframework.core.io.ClassPathResource;
@@ -57,6 +59,27 @@ public class SchemaBootstrapHandler implements RequestHandler<Map<String,Object>
         Integer exists=jdbc.queryForObject("SELECT COUNT(*) FROM login WHERE username='manager'",Integer.class);
         if (exists==0) jdbc.update("INSERT INTO login(username,password,role,emp_id) VALUES ('manager',?,'MANAGER',100)",
                 new BCryptPasswordEncoder(12).encode(DatabaseConnections.required("INITIAL_MANAGER_PASSWORD")));
-        return Map.of("SchemaVersion","1","ManagerUsername","manager");
+        if ("true".equals(System.getenv("DEMO_DATA_ENABLED"))) initializeDemo(jdbc);
+        return Map.of("SchemaVersion","2","ManagerUsername","manager");
+    }
+
+    /** Adds explicitly requested synthetic demo data once, without resetting decisions or balances. */
+    private void initializeDemo(JdbcTemplate jdbc) {
+        int employeeId = 900100;
+        int leaveTypeId = 900001;
+        jdbc.update("INSERT IGNORE INTO employee(emp_id,emp_name,designation,manager_id,gender,address) VALUES (?, 'Demo Employee', 'Demo Employee', 100, 'Other', 'Synthetic demonstration record')", employeeId);
+        Integer assigned = jdbc.queryForObject("SELECT COUNT(*) FROM employee WHERE emp_id=? AND emp_name='Demo Employee' AND manager_id=100", Integer.class, employeeId);
+        if (!Integer.valueOf(1).equals(assigned)) throw new IllegalStateException("Demo employee ID is already in use");
+        Integer existingLogin = jdbc.queryForObject("SELECT COUNT(*) FROM login WHERE username='employee.demo'", Integer.class);
+        if (Integer.valueOf(0).equals(existingLogin)) jdbc.update("INSERT INTO login(username,password,role,emp_id) VALUES ('employee.demo',?,'EMPLOYEE',?)",
+                new BCryptPasswordEncoder(12).encode(DatabaseConnections.required("DEMO_EMPLOYEE_PASSWORD")), employeeId);
+        Integer ownedLogin = jdbc.queryForObject("SELECT COUNT(*) FROM login WHERE username='employee.demo' AND emp_id=? AND role='EMPLOYEE'", Integer.class, employeeId);
+        if (!Integer.valueOf(1).equals(ownedLogin)) throw new IllegalStateException("Demo username is already in use");
+        jdbc.update("INSERT IGNORE INTO leave_type(leave_type_id,leave_type_name,description,annual_quota,allow_negative_balance) VALUES (?, 'Demo Annual Leave', 'Synthetic leave type for Member 3 verification', 20, FALSE)", leaveTypeId);
+        LocalDate start = LocalDate.now(ZoneOffset.UTC).plusDays(1);
+        if (start.plusDays(1).getYear() != start.getYear()) start = start.plusDays(1);
+        jdbc.update("INSERT IGNORE INTO leave_balance(emp_id,leave_type_id,total_allocated_days,used_days,remaining_days,`year`) VALUES (?,?,20,0,20,?)", employeeId, leaveTypeId, start.getYear());
+        jdbc.update("INSERT INTO leave_application(emp_id,leave_type_id,start_date,end_date,no_of_days_requested,reason,status) SELECT ?,?,?,?,2,'Demo request for Member 3 approval verification','PENDING' WHERE NOT EXISTS (SELECT 1 FROM leave_application WHERE emp_id=? AND leave_type_id=? AND reason='Demo request for Member 3 approval verification')",
+                employeeId, leaveTypeId, start, start.plusDays(1), employeeId, leaveTypeId);
     }
 }

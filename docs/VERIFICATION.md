@@ -1,38 +1,24 @@
-# Verification — 28 October 2026
+# Verification — Java 17 deployment build, 28 October 2026
 
-The backend was written directly into `E:\eclipse-workspace\leave-management-system-aws`. The previous project was used only as a read-only source of the required shared model and Member 3 files. Its frontend and unrelated modules were not copied. The original AWS starter was backed up in this chat workspace before updating it.
+The requested backend and scoped frontend are in `E:\eclipse-workspace\leave-management-system-aws`. The previous project remains unchanged.
 
-## Completed checks
+The Maven compiler targets Java 17 (`--release 17`); all 49 application classes in the ZIP have class-file major version 61. Tests executed on **Temurin Java 17.0.20.1**, using Maven 3.9.16. Lambda is configured with AWS's current Java 17 runtime identifier, **java17.al2023**. Maven `clean verify -Plambda` completed successfully.
 
-- `mvn -Plambda clean verify`: exit code 0, using Java 21 and Maven 3.9.16.
-- `ApprovalServiceTest`: 25 passed, 0 failures/errors. Covers decisions, assignment/role checks, self approval, comments, balances, duplicates, cancellation, cross-year restrictions, rollback, competing transactions, authentication and notification/audit access.
-- `StreamLambdaHandlerTest`: 1 passed, 0 failures/errors. The actual stream handler returned HTTP 200 for `/ping` and HTTP 401 for an unauthenticated protected API request.
-- `MySqlSmokeTest`: 1 passed, 0 failures/errors against an isolated MySQL Community Server 8.0.46 instance using a new temporary data directory and loopback port 13316. The supplied schema and local fixture loaded successfully. Hibernate `validate`, BCrypt login, token authentication, balance deduction, decision persistence, notification creation and actor-attributed audit persistence passed. The test transaction rolled back afterward.
-- Total: **27 tests passed; no failures, errors or skips** in this verification run. The MySQL test is opt-in and is skipped during ordinary builds without its environment variables.
-- The generated Lambda ZIP was extracted and executed using its own production classes/dependencies, without embedded Tomcat or H2. It connected to the isolated MySQL schema, passed Hibernate validation and returned `{"status":"UP"}` through the real Lambda stream handler.
-- The archive contains compiled main classes/resources and runtime libraries; no tests, test database configuration, Mockito, H2 or embedded Tomcat. Compressed size: 46,246,034 bytes; uncompressed size: 51,882,291 bytes.
-- All 45 Java source/test files have documentation comments. Source scan found no explicit `try`/`catch` blocks.
-- Maven and assembly XML parsed successfully. SAM YAML syntax parsed successfully with SnakeYAML, including its CloudFormation tags.
+| Test suite | Tests | Failures | Errors | Skipped |
+|---|---:|---:|---:|---:|
+| MySqlSmokeTest | 1 | 0 | 0 | 1 |
+| RestrictedMySqlSmokeTest | 1 | 0 | 0 | 0 |
+| ApprovalServiceTest | 25 | 0 | 0 | 0 |
+| StreamLambdaHandlerTest | 1 | 0 | 0 | 0 |
 
-Artifacts in the project:
+**27 enabled tests passed; one optional fresh-database test was skipped.** The regression suite used the actual restricted `lms_app` database user and demonstrated that the shared employee-assignment lock works with SELECT-only permissions. It checked the balance deduction and transactional outbox write against isolated MySQL 8.0.46, with rollback afterward. Approval tests cover assignment/role checks, rejection, duplicate/cancelled decisions, balance policy, failed notification rollback and concurrent balance updates. The actual Lambda stream adapter returns 200 for `/ping` and 401 for unauthenticated protected routes.
 
-- `target/leave-management-system-aws-0.0.1-SNAPSHOT.jar` — executable local server.
-- `target/leave-management-system-aws-0.0.1-SNAPSHOT-lambda-package.zip` — Lambda deployment archive.
-- `target/surefire-reports/` — machine-readable and text test results.
+The exact AWS database initializer was exercised on an isolated MySQL instance: fresh schema creation, idempotent update, initial manager provisioning and table-level application grants succeeded. The application's database identity has no ALL PRIVILEGES grant. The employee lock was changed to a shared lock after the full frontend check exposed MySQL's additional privilege requirement for `FOR UPDATE`.
 
-## Repeating the optional MySQL check
+The frontend production build (`npm run build`) succeeded with Vite 8.3.5, React 18.3.1 and the previous project's Bootstrap styling. Browser checks verified login, the assigned manager's pending queue, mandatory comments, successful approval and removal from the pending queue. Direct database checks confirmed used days 3, remaining days 17, APPROVED status and acting manager 100. The audit/notification screens use only authorized scoped endpoints.
 
-Use a **disposable, fresh MySQL database**, load `database/schema.sql` and `database/local-fixture.sql`, and set these variables only in the terminal used for the check:
+The Lambda ZIP is `backend-828346eb2db07607.zip`: 56,063,585 compressed bytes and 62,956,677 uncompressed bytes. It contains the RDS regional trust store, deployment schema, main code and runtime libraries; it excludes test classes, H2 and embedded Tomcat. All 52 Java source/test files have documentation comments, and a source scan found no explicit try/catch blocks.
 
-```powershell
-$env:MYSQL_SMOKE_URL='jdbc:mysql://127.0.0.1:<test-port>/<disposable-database>'
-$env:MYSQL_SMOKE_USERNAME='<test database user>'
-$env:MYSQL_SMOKE_PASSWORD='<test database password>'
-mvn -Dtest=MySqlSmokeTest test
-```
+The complete CloudFormation template passed `cfn-lint` for ap-south-1 with no errors or warnings, and AWS accepted its template-summary validation. The API stage is **stage1**. Actual resource creation and deployed API/frontend checks are tracked separately in `deployment/STATUS.md`.
 
-The test expects the unchanged optional local fixture and creates its own temporary test login inside a rolled-back transaction. Never point it at production or an existing shared database. The isolated instance used for this verification was shut down afterward; no existing MySQL service or database was modified.
-
-## Remaining environment-dependent checks
-
-No AWS resources were created and no deployment was performed. AWS SAM CLI was not installed, so semantic `sam validate`, CloudFormation deployment, IAM/Secrets Manager access, VPC routing/security groups, RDS TLS/certificates, secret refresh, region/account quotas and deployed API behavior remain to be checked during the deployment stage. The local MySQL and packaged-handler checks do not verify those AWS settings.
+The opt-in `RestrictedMySqlSmokeTest` is restricted to localhost URLs and requires `MYSQL_RESTRICTED_URL`, `MYSQL_RESTRICTED_PASSWORD` and `MYSQL_RESTRICTED_MANAGER_PASSWORD`. It expects the disposable local fixture initialized with `lms_app` and manager 100. Do not point local test fixtures at production data.

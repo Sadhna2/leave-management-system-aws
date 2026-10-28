@@ -1,6 +1,6 @@
 # Leave Management System AWS — Member 3 Backend
 
-This project implements **Approval, Notifications and Audit** from the supplied Member 3 requirements. Sources are written directly in `E:\eclipse-workspace\leave-management-system-aws`; the previous project is unchanged. Java 21, Spring Boot 3.4.5 and the existing AWS serverless Java container 2.1.6 starter are retained. Maven is the build definition. Import **Existing Maven Projects** in Eclipse and select this folder; use Java 21 and Maven > Update Project.
+This project implements **Approval, Notifications and Audit** from the supplied Member 3 requirements. Sources are written directly in `E:\eclipse-workspace\leave-management-system-aws`; the previous project is unchanged. Java 17, Spring Boot 3.4.5 and the existing AWS serverless Java container 2.1.6 starter are retained. Maven is the build definition. Import **Existing Maven Projects** in Eclipse and select this folder; use Java 17 and Maven > Update Project.
 
 ## Scope and included files
 
@@ -16,7 +16,7 @@ This project implements **Approval, Notifications and Audit** from the supplied 
 | Global errors | `ApiException`, `GlobalExceptionHandler` |
 | Verification | `ApprovalServiceTest`, `StreamLambdaHandlerTest` |
 
-Only the shared entities/repositories needed to decide a leave are included: Employee, LeaveApplication, LeaveBalance and LeaveType. Existing notification/audit code, enums and shared model shapes were selectively reused and documented. No frontend, HR controller, employee CRUD, leave submission controller, holiday scheduler or unrelated tests are copied. See `docs/FILE-GUIDE.md` for the role of every source/configuration file.
+Only the shared entities/repositories needed to decide a leave are included: Employee, LeaveApplication, LeaveBalance and LeaveType. Existing notification/audit code, enums and shared model shapes were selectively reused and documented. The backend excludes HR controllers, employee CRUD, leave submission controllers, holiday schedulers and unrelated tests. The frontend in `frontend/` includes only the selected Member 3 screens and login. See `docs/FILE-GUIDE.md` for the role of every source/configuration file.
 
 Login is necessary to establish a real manager identity. Public registration is intentionally absent: employees, assignments, roles and initial balances are provisioned by the owning employee/HR module or a database administrator. This prevents public callers from registering as managers. This backend consumes existing PENDING leave records; it does not implement another team member's leave submission workflow.
 
@@ -34,7 +34,7 @@ There are **no explicit try/catch blocks** in project Java sources. Services thr
 
 ## Local setup
 
-Requirements: Java 21, Maven 3.9+, MySQL 8. AWS credentials are not needed for local development or tests.
+Requirements: Java 17, Maven 3.9+, MySQL 8. AWS credentials are not needed for local development or tests.
 
 1. Create a **new** database such as `lms_approval`; do not point this project at the previous database without an explicit migration. Run `database/schema.sql` as schema owner after selecting that database. Hibernate uses `validate`, so it never creates or changes production tables. The script is for a fresh database and is not an idempotent migration.
 2. Create a restricted application database user with SELECT on the shared employee/leave-type tables; SELECT/UPDATE on leave_application and leave_balance; SELECT/INSERT on approval and audit_log; SELECT/INSERT/UPDATE on notification; SELECT on login; and SELECT/INSERT/UPDATE/DELETE on auth_session. Account provisioning uses a separate administrative identity. Do not use root as the application user.
@@ -110,9 +110,9 @@ The H2 MySQL-mode test profile is test-only. Tests cover success/rejection, assi
 
 The normal build produces an executable JAR. The lambda profile additionally produces `target/leave-management-system-aws-0.0.1-SNAPSHOT-lambda-package.zip`, with compiled classes/resources at the root and runtime dependencies in `lib/`. `src/assembly/bin.xml` excludes the embedded Tomcat server from the Lambda ZIP. The Gradle file delegates to Maven to avoid a second inconsistent dependency definition.
 
-## AWS preparation (deployment is a separate next step)
+## AWS deployment configuration
 
-`template.yml` prepares an API Gateway REST API and Java 21 Lambda function; it does not create RDS, networks or accounts. The handler is `com.nexturn.lms.StreamLambdaHandler::handleRequest`. This follows the existing starter's [AWS Spring Boot adapter](https://github.com/aws/serverless-java-container/wiki/Quick-start---Spring-Boot3) and [Lambda Java ZIP layout](https://docs.aws.amazon.com/lambda/latest/dg/java-package.html).
+`template.yml` prepares an API Gateway REST API and Java 17 Lambda function; it does not create RDS, networks or accounts. The handler is `com.nexturn.lms.StreamLambdaHandler::handleRequest`. This follows the existing starter's [AWS Spring Boot adapter](https://github.com/aws/serverless-java-container/wiki/Quick-start---Spring-Boot3) and [Lambda Java ZIP layout](https://docs.aws.amazon.com/lambda/latest/dg/java-package.html).
 
 Before deploying: choose an AWS region, provide an existing private MySQL/RDS database (or RDS Proxy), private subnet IDs and Lambda security groups, create the fresh schema/provisioned data, and store the restricted DB username/password in an existing Secrets Manager secret. Configure DB ingress TCP 3306 from the Lambda security group, not the public internet. Use a TLS JDBC URL with `sslMode=VERIFY_IDENTITY` and a trusted CA setup. Budget database connections for reserved concurrency × the Hikari pool limit (5 × 3 in this starter), and adjust after measuring. API stage throttling is included; production abuse protection, monitoring and credential policies remain deployment configuration.
 
@@ -126,4 +126,14 @@ sam deploy --template-file template.yml --guided --profile <your-sso-profile>
 
 Do not run `sam build` against this template's ZIP CodeUri; Maven already built the archive. CloudFormation resolves the supplied secret at deployment; the deploy identity needs access to that secret/KMS key. The function runtime needs only logging/VPC permissions for this implementation. Secret rotation requires a function configuration update/redeployment to refresh environment values. Database connections use TLS and credentials injected at deployment; AWS credentials are never application settings. The API base URL is a stack output. Verify `/ping`, login, both decisions, notifications and audit against MySQL after deployment.
 
-This backend has not been deployed to AWS. See `docs/VERIFICATION.md` for the checks actually run.
+The complete new-RDS deployment is in `deployment/cloudformation.json`; see `deployment/README.md` for its architecture, permissions, generated manager account, S3 frontend and stage `stage1`. The root SAM template is the earlier existing-database alternative. See `docs/VERIFICATION.md` and `deployment/STATUS.md` for the checks and deployment state actually reached.
+
+## Scoped frontend
+
+`frontend/` reuses the previous project's LeaveHub styling, responsive shell, shared components, login form, approval cards and notification list. It adds the required audit screen and adapts all calls to this backend. Only **login, approvals, notifications and audit** are included. The manager decision requires a comment; account identity comes from the backend token. There are no public registration, HR, leave submission, employee CRUD, allocation, calendar or holiday pages.
+
+Use Node 22.12+ and run `npm ci` followed by `npm run build` inside `frontend/`. Only the compiled contents of `frontend/dist/` are uploaded to the frontend S3 bucket. The public API URL is configured in `config.json` after provisioning and ends in `/stage1`. No database passwords or AWS keys belong in that file. The backend ZIP is a Lambda deployment artifact stored in the separate private artifact bucket. See `frontend/README.md` for local setup and the runtime configuration contract.
+
+## Deployed application
+
+[Open frontend](https://leave-management-system-frontend-773384831067-ap-south-1.s3.ap-south-1.amazonaws.com/index.html) � [API health](https://96h1em86gl.execute-api.ap-south-1.amazonaws.com/stage1/ping). Main Lambda runs Java 17; API stage is `stage1`. See `deployment/STATUS.md` for verified deployment details and private login retrieval instructions.

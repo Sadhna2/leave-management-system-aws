@@ -101,27 +101,27 @@ class ApprovalServiceTest {
     private String token(String username) throws Exception { return login.login(new LoginRequest(username,PASSWORD)).accessToken(); }
     private void noSideEffects() {
         assertThat(leaves.findById(leaveId).orElseThrow().getStatus()).isEqualTo(LeaveStatus.PENDING);
-        assertThat(balances.findAll().getFirst().getUsedDays()).isZero();
+        assertThat(balances.findAll().get(0).getUsedDays()).isZero();
         assertThat(decisions.count()).isZero(); assertThat(notifications.count()).isZero(); assertThat(audits.count()).isZero();
         assertThat(outbox.count()).isZero();
     }
     @Test void approvalPersistsAllEffectsAndActor() {
         approvals.decide(leaveId,request(),true,manager);
         assertThat(leaves.findById(leaveId).orElseThrow().getStatus()).isEqualTo(LeaveStatus.APPROVED);
-        assertThat(balances.findAll().getFirst().getUsedDays()).isEqualTo(3);
-        assertThat(balances.findAll().getFirst().getRemainingDays()).isEqualTo(7);
-        assertThat(decisions.findAll().getFirst().getComment()).isEqualTo(request().comment());
-        assertThat(decisions.findAll().getFirst().getManagerId()).isEqualTo(100);
-        assertThat(notifications.findAll().getFirst().getType()).isEqualTo(NotificationType.LEAVE_APPROVED);
-        assertThat(audits.findAll().getFirst().getActorEmpId()).isEqualTo(100);
+        assertThat(balances.findAll().get(0).getUsedDays()).isEqualTo(3);
+        assertThat(balances.findAll().get(0).getRemainingDays()).isEqualTo(7);
+        assertThat(decisions.findAll().get(0).getComment()).isEqualTo(request().comment());
+        assertThat(decisions.findAll().get(0).getManagerId()).isEqualTo(100);
+        assertThat(notifications.findAll().get(0).getType()).isEqualTo(NotificationType.LEAVE_APPROVED);
+        assertThat(audits.findAll().get(0).getActorEmpId()).isEqualTo(100);
         assertThat(outbox.count()).isOne();
     }
     @Test void rejectionDoesNotDeductBalance() {
         approvals.decide(leaveId,new ApprovalRequest("Team coverage unavailable"),false,manager);
         assertThat(leaves.findById(leaveId).orElseThrow().getStatus()).isEqualTo(LeaveStatus.REJECTED);
-        assertThat(balances.findAll().getFirst().getUsedDays()).isZero();
+        assertThat(balances.findAll().get(0).getUsedDays()).isZero();
         assertThat(decisions.count()).isOne(); assertThat(audits.count()).isOne();
-        assertThat(notifications.findAll().getFirst().getType()).isEqualTo(NotificationType.LEAVE_REJECTED);
+        assertThat(notifications.findAll().get(0).getType()).isEqualTo(NotificationType.LEAVE_REJECTED);
     }
     @Test void unassignedManagerCannotDecide() {
         assertThatThrownBy(() -> approvals.decide(leaveId,request(),true,accounts.findById("other").orElseThrow()))
@@ -140,7 +140,7 @@ class ApprovalServiceTest {
         approvals.decide(leaveId,request(),true,manager);
         assertThatThrownBy(() -> approvals.decide(leaveId,request(),false,manager)).isInstanceOf(ApiException.class);
         assertThat(decisions.count()).isOne(); assertThat(notifications.count()).isOne();
-        assertThat(balances.findAll().getFirst().getUsedDays()).isEqualTo(3);
+        assertThat(balances.findAll().get(0).getUsedDays()).isEqualTo(3);
     }
     @Test void cancelledLeaveCannotBeDecided() {
         LeaveApplication l=leaves.findById(leaveId).orElseThrow(); l.setStatus(LeaveStatus.CANCELLED); leaves.save(l);
@@ -155,7 +155,7 @@ class ApprovalServiceTest {
         type.setAllowNegativeBalance(true); types.save(type);
         LeaveApplication l=leaves.findById(leaveId).orElseThrow(); l.setNoOfDaysRequested(11); leaves.save(l);
         approvals.decide(leaveId,request(),true,manager);
-        assertThat(balances.findAll().getFirst().getRemainingDays()).isEqualTo(-1);
+        assertThat(balances.findAll().get(0).getRemainingDays()).isEqualTo(-1);
     }
     @Test void missingBalanceNeverGetsSilentlyCreated() {
         balances.deleteAll();
@@ -184,7 +184,7 @@ class ApprovalServiceTest {
         List<Boolean> results=List.of(a.join(),b.join()); executor.shutdown();
         assertThat(results).containsExactlyInAnyOrder(true,false);
         assertThat(decisions.count()).isOne(); assertThat(notifications.count()).isOne();
-        assertThat(balances.findAll().getFirst().getUsedDays()).isEqualTo(3);
+        assertThat(balances.findAll().get(0).getUsedDays()).isEqualTo(3);
     }
     @Test void differentLeavesCannotOverspendSharedBalance() {
         LeaveApplication first=leaves.findById(leaveId).orElseThrow(); first.setNoOfDaysRequested(7); leaves.save(first);
@@ -196,7 +196,7 @@ class ApprovalServiceTest {
                 .handle((result,error) -> error==null);
         List<Boolean> results=List.of(a.join(),b.join()); executor.shutdown();
         assertThat(results).containsExactlyInAnyOrder(true,false);
-        assertThat(decisions.count()).isOne(); assertThat(balances.findAll().getFirst().getRemainingDays()).isEqualTo(3);
+        assertThat(decisions.count()).isOne(); assertThat(balances.findAll().get(0).getRemainingDays()).isEqualTo(3);
     }
     @Test void unauthenticatedRequestIsJson401() throws Exception {
         mvc.perform(get("/api/manager/leaves/pending")).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.status").value(401));
@@ -206,7 +206,7 @@ class ApprovalServiceTest {
             .content(json.writeValueAsString(new LoginRequest("manager",PASSWORD))))
             .andExpect(status().isOk()).andExpect(jsonPath("$.accessToken").isString())
             .andExpect(jsonPath("$.empId").value(100)).andExpect(jsonPath("$.password").doesNotExist());
-        assertThat(sessions.findAll().getFirst().getTokenHash()).hasSize(64);
+        assertThat(sessions.findAll().get(0).getTokenHash()).hasSize(64);
     }
     @Test void wrongPasswordIs401() throws Exception {
         mvc.perform(post("/api/auth/login").contentType("application/json")
@@ -234,14 +234,14 @@ class ApprovalServiceTest {
         mvc.perform(get("/api/auth/me").header("Authorization",header)).andExpect(status().isUnauthorized());
     }
     @Test void expiredTokenIsRejected() throws Exception {
-        String accessToken=token("manager"); AuthSession s=sessions.findAll().getFirst();
+        String accessToken=token("manager"); AuthSession s=sessions.findAll().get(0);
         sessions.save(new AuthSession(s.getTokenHash(),s.getUsername(),Instant.now().minusSeconds(1)));
         mvc.perform(get("/api/auth/me").header("Authorization","Bearer "+accessToken)).andExpect(status().isUnauthorized());
     }
     @Test void notificationAndAuditReadsEnforceOwnership() throws Exception {
         approvals.decide(leaveId,request(),true,manager);
         String employeeHeader="Bearer "+token("employee"); String otherHeader="Bearer "+token("other");
-        Long id=notifications.findAll().getFirst().getNotificationId();
+        Long id=notifications.findAll().get(0).getNotificationId();
         mvc.perform(get("/api/notifications").header("Authorization",employeeHeader)).andExpect(status().isOk())
             .andExpect(jsonPath("$.totalElements").value(1));
         mvc.perform(patch("/api/notifications/"+id+"/read").header("Authorization",otherHeader)).andExpect(status().isNotFound());

@@ -50,9 +50,9 @@ class MySqlSmokeTest {
         approvals.decide(leave.getLeaveId(),new ApprovalRequest("MySQL smoke review"),true,manager);
         decisions.flush();
         assertThat(leaves.findById(leave.getLeaveId()).orElseThrow().getStatus()).isEqualTo(LeaveStatus.APPROVED);
-        assertThat(balances.findAll().getFirst().getRemainingDays()).isEqualTo(17);
+        assertThat(balances.findAll().get(0).getRemainingDays()).isEqualTo(17);
         assertThat(decisions.count()).isOne();
         assertThat(notifications.count()).isOne();
-        assertThat(audits.findAll().getFirst().getActorEmpId()).isEqualTo(100);
+        assertThat(audits.findAll().get(0).getActorEmpId()).isEqualTo(100);
     }
 }

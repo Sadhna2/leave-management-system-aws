@@ -1,0 +1,19 @@
+{
+  "account": "773384831067",
+  "region": "ap-south-1",
+  "stackName": "leave-management-system-aws-v2",
+  "stackStatus": "UPDATE_COMPLETE",
+  "frontendUrl": "https://leave-management-system-frontend-773384831067-ap-south-1.s3.ap-south-1.amazonaws.com/index.html",
+  "apiBaseUrl": "https://96h1em86gl.execute-api.ap-south-1.amazonaws.com/stage1",
+  "healthUrl": "https://96h1em86gl.execute-api.ap-south-1.amazonaws.com/stage1/ping",
+  "lambdaFunction": "leave-management-system-lambda-aws",
+  "runtime": "java17.al2023",
+  "rdsInstance": "leave-management-system-rds-aws",
+  "rdsEndpoint": "leave-management-system-rds-aws.c5mc0o4u4um1.ap-south-1.rds.amazonaws.com",
+  "frontendBucket": "leave-management-system-frontend-773384831067-ap-south-1",
+  "artifactAndArchiveBucket": "leave-management-system-aws-773384831067-ap-south-1",
+  "snsTopicArn": "arn:aws:sns:ap-south-1:773384831067:leave-management-system-notifications-aws",
+  "queueUrl": "https://sqs.ap-south-1.amazonaws.com/773384831067/leave-management-system-events-aws",
+  "pipelineTestEventId": "7b3e5a41-0aca-4c59-91a5-7c8cfa991002",
+  "oldRdsDeletion": "Confirmed deleted without final snapshot or retained automated backups"
+}

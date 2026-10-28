@@ -6,10 +6,12 @@
  <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.4.5</version><relativePath/></parent>
  <groupId>com.nexturn.lms</groupId><artifactId>leave-management-system-aws</artifactId><version>0.0.1-SNAPSHOT</version>
  <name>Leave Management - Approvals, Notifications and Audit</name>
- <properties><java.version>21</java.version></properties>
+ <properties><java.version>17</java.version></properties>
  <dependencies>
   <!-- SNS is used only by the scheduled outbox relay, never inside the approval HTTP transaction. -->
   <dependency><groupId>software.amazon.awssdk</groupId><artifactId>sns</artifactId><version>2.31.78</version></dependency>
+  <!-- The Java 17 archive worker writes SQS event payloads to the private audit prefix. -->
+  <dependency><groupId>software.amazon.awssdk</groupId><artifactId>s3</artifactId><version>2.31.78</version></dependency>
   <dependency><groupId>software.amazon.awssdk</groupId><artifactId>url-connection-client</artifactId><version>2.31.78</version></dependency>
   <dependency><groupId>com.amazonaws.serverless</groupId><artifactId>aws-serverless-java-container-springboot3</artifactId><version>2.1.6</version></dependency>
   <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>

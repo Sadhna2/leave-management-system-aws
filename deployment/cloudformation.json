@@ -1,0 +1,1452 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "LMS Member 3: private RDS MySQL, Java Lambda API, transactional SNS/SQS delivery and private S3 archive",
+  "Metadata": {
+    "ProjectDocumentation": "deployment/README.md",
+    "BuildSHA256": "828346eb2db07607c19b7fceb5c13f367ef30809bcddd1cf60fcf51e692ba3c4",
+    "NetworkDesign": "Dedicated VPC; private RDS; no NAT or Internet Gateway; SNS interface and S3 gateway endpoints",
+    "DataRetention": "RDS snapshots, secrets and the externally created versioned private S3 bucket survive stack removal",
+    "Recovery": "Reuses three retained secrets; VPC quota freed by confirmed deletion of unused vpc-045d07c90f37c0db7",
+    "FrontendDesign": "Compiled frontend files only; public GetObject over HTTPS; no list/write access; HashRouter at /index.html",
+    "ArchiveBuildSHA256": "3d4a404dbbf3b1ecc035bd9227e323a4f1b448ecd001f5759984c5a23b567a47",
+    "ArchiveRuntime": "Java 17; replaces the original inline Python worker"
+  },
+  "Parameters": {
+    "ArtifactBucket": {
+      "Type": "String",
+      "Default": "leave-management-system-aws-773384831067-ap-south-1",
+      "AllowedValues": [
+        "leave-management-system-aws-773384831067-ap-south-1"
+      ],
+      "Description": "Existing private versioned project bucket containing the content-addressed backend ZIP"
+    },
+    "CorsOrigins": {
+      "Type": "String",
+      "Default": "http://localhost:5173",
+      "Description": "Comma-separated exact frontend origins"
+    },
+    "DatabaseAdminSecret": {
+      "Type": "String",
+      "Default": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:DatabaseAdminSecret-hSyhyXdpvCRV-X32wA0",
+      "Description": "Existing project credential retained by the first deployment rollback; value stays in Secrets Manager",
+      "AllowedPattern": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:.+"
+    },
+    "DatabaseAppSecret": {
+      "Type": "String",
+      "Default": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:DatabaseAppSecret-RZMh2yNaU7Ij-TC9vUM",
+      "Description": "Existing project credential retained by the first deployment rollback; value stays in Secrets Manager",
+      "AllowedPattern": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:.+"
+    },
+    "InitialManagerSecret": {
+      "Type": "String",
+      "Default": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:InitialManagerSecret-HgyoWZFuAaYc-EISLlO",
+      "Description": "Existing project credential retained by the first deployment rollback; value stays in Secrets Manager",
+      "AllowedPattern": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:.+"
+    }
+  },
+  "Resources": {
+    "Vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": "10.42.0.0/16",
+        "EnableDnsSupport": true,
+        "EnableDnsHostnames": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "SubnetA": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "CidrBlock": "10.42.0.0/24",
+        "AvailabilityZone": {
+          "Fn::Select": [
+            0,
+            {
+              "Fn::GetAZs": ""
+            }
+          ]
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "RouteTableA": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "RouteAssociationA": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "RouteTableA"
+        },
+        "SubnetId": {
+          "Ref": "SubnetA"
+        }
+      }
+    },
+    "SubnetB": {
+      "Type": "AWS::EC2::Subnet",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "CidrBlock": "10.42.1.0/24",
+        "AvailabilityZone": {
+          "Fn::Select": [
+            1,
+            {
+              "Fn::GetAZs": ""
+            }
+          ]
+        },
+        "MapPublicIpOnLaunch": false,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "RouteTableB": {
+      "Type": "AWS::EC2::RouteTable",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "RouteAssociationB": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "RouteTableB"
+        },
+        "SubnetId": {
+          "Ref": "SubnetB"
+        }
+      }
+    },
+    "LambdaSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "GroupDescription": "LMS private Lambda outbound connections",
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3306,
+            "ToPort": 3306,
+            "CidrIp": "10.42.0.0/16"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "DatabaseSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "GroupDescription": "MySQL ingress only from project Lambda security group",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3306,
+            "ToPort": 3306,
+            "SourceSecurityGroupId": {
+              "Ref": "LambdaSecurityGroup"
+            }
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "10.42.0.0/16"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "EndpointSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "GroupDescription": "SNS private endpoint accepts TLS from project Lambda only",
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "SourceSecurityGroupId": {
+              "Ref": "LambdaSecurityGroup"
+            }
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "10.42.0.0/16"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "S3Endpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "VpcEndpointType": "Gateway",
+        "ServiceName": {
+          "Fn::Sub": "com.amazonaws.${AWS::Region}.s3"
+        },
+        "RouteTableIds": [
+          {
+            "Ref": "RouteTableA"
+          },
+          {
+            "Ref": "RouteTableB"
+          }
+        ]
+      }
+    },
+    "DatabaseSubnetGroup": {
+      "Type": "AWS::RDS::DBSubnetGroup",
+      "Properties": {
+        "DBSubnetGroupDescription": "LMS isolated RDS subnets",
+        "SubnetIds": [
+          {
+            "Ref": "SubnetA"
+          },
+          {
+            "Ref": "SubnetB"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "Database": {
+      "Type": "AWS::RDS::DBInstance",
+      "Properties": {
+        "DBInstanceIdentifier": "leave-management-system-rds-aws",
+        "Engine": "mysql",
+        "DBInstanceClass": "db.t4g.micro",
+        "AllocatedStorage": "20",
+        "StorageType": "gp3",
+        "StorageEncrypted": true,
+        "MasterUsername": {
+          "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAdminSecret}:SecretString:username}}"
+        },
+        "MasterUserPassword": {
+          "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAdminSecret}:SecretString:password}}"
+        },
+        "DBName": "lms_approval",
+        "DBSubnetGroupName": {
+          "Ref": "DatabaseSubnetGroup"
+        },
+        "VPCSecurityGroups": [
+          {
+            "Ref": "DatabaseSecurityGroup"
+          }
+        ],
+        "MultiAZ": false,
+        "PubliclyAccessible": false,
+        "BackupRetentionPeriod": 1,
+        "AutoMinorVersionUpgrade": true,
+        "EngineLifecycleSupport": "open-source-rds-extended-support-disabled",
+        "CopyTagsToSnapshot": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      },
+      "DeletionPolicy": "Snapshot",
+      "UpdateReplacePolicy": "Snapshot"
+    },
+    "NotificationTopic": {
+      "Type": "AWS::SNS::Topic",
+      "Properties": {
+        "TopicName": "leave-management-system-notifications-aws",
+        "KmsMasterKeyId": "alias/aws/sns",
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "DeadLetterQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": "leave-management-system-events-dlq-aws",
+        "MessageRetentionPeriod": 1209600,
+        "SqsManagedSseEnabled": true,
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "EventQueue": {
+      "Type": "AWS::SQS::Queue",
+      "Properties": {
+        "QueueName": "leave-management-system-events-aws",
+        "MessageRetentionPeriod": 1209600,
+        "VisibilityTimeout": 180,
+        "ReceiveMessageWaitTimeSeconds": 20,
+        "SqsManagedSseEnabled": true,
+        "RedrivePolicy": {
+          "deadLetterTargetArn": {
+            "Fn::GetAtt": [
+              "DeadLetterQueue",
+              "Arn"
+            ]
+          },
+          "maxReceiveCount": 5
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "QueuePolicy": {
+      "Type": "AWS::SQS::QueuePolicy",
+      "Properties": {
+        "Queues": [
+          {
+            "Ref": "EventQueue"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "sns.amazonaws.com"
+              },
+              "Action": "sqs:SendMessage",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EventQueue",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "ArnEquals": {
+                  "aws:SourceArn": {
+                    "Ref": "NotificationTopic"
+                  }
+                },
+                "StringEquals": {
+                  "aws:SourceAccount": {
+                    "Ref": "AWS::AccountId"
+                  }
+                }
+              }
+            },
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "sqs:*",
+              "Resource": {
+                "Fn::GetAtt": [
+                  "EventQueue",
+                  "Arn"
+                ]
+              },
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "TopicSubscription": {
+      "Type": "AWS::SNS::Subscription",
+      "Properties": {
+        "TopicArn": {
+          "Ref": "NotificationTopic"
+        },
+        "Protocol": "sqs",
+        "Endpoint": {
+          "Fn::GetAtt": [
+            "EventQueue",
+            "Arn"
+          ]
+        },
+        "RawMessageDelivery": true
+      },
+      "DependsOn": "QueuePolicy"
+    },
+    "BucketTransportPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "ArtifactBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "ApiRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "BootstrapRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      }
+    },
+    "OutboxRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ],
+        "Policies": [
+          {
+            "PolicyName": "ProjectResources",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": "sns:Publish",
+                  "Resource": {
+                    "Ref": "NotificationTopic"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "kms:GenerateDataKey",
+                    "kms:Decrypt"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:kms:${AWS::Region}:${AWS::AccountId}:key/*"
+                  },
+                  "Condition": {
+                    "StringEquals": {
+                      "kms:ViaService": {
+                        "Fn::Sub": "sns.${AWS::Region}.amazonaws.com"
+                      },
+                      "kms:EncryptionContext:aws:sns:topicArn": {
+                        "Ref": "NotificationTopic"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ArchiveRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "lambda.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ],
+        "Policies": [
+          {
+            "PolicyName": "ProjectResources",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "sqs:ReceiveMessage",
+                    "sqs:DeleteMessage",
+                    "sqs:GetQueueAttributes"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "EventQueue",
+                      "Arn"
+                    ]
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": "s3:PutObject",
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${ArtifactBucket}/audit/*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "SnsEndpoint": {
+      "Type": "AWS::EC2::VPCEndpoint",
+      "Properties": {
+        "VpcId": {
+          "Ref": "Vpc"
+        },
+        "VpcEndpointType": "Interface",
+        "PrivateDnsEnabled": true,
+        "ServiceName": {
+          "Fn::Sub": "com.amazonaws.${AWS::Region}.sns"
+        },
+        "SubnetIds": [
+          {
+            "Ref": "SubnetA"
+          }
+        ],
+        "SecurityGroupIds": [
+          {
+            "Ref": "EndpointSecurityGroup"
+          }
+        ],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": {
+                  "Fn::GetAtt": [
+                    "OutboxRole",
+                    "Arn"
+                  ]
+                }
+              },
+              "Action": "sns:Publish",
+              "Resource": {
+                "Ref": "NotificationTopic"
+              }
+            }
+          ]
+        }
+      }
+    },
+    "FrontendBucket": {
+      "Type": "AWS::S3::Bucket",
+      "Properties": {
+        "BucketName": "leave-management-system-frontend-773384831067-ap-south-1",
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": false,
+          "RestrictPublicBuckets": false
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      },
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain"
+    },
+    "FrontendOriginAccess": {
+      "Type": "AWS::CloudFront::OriginAccessControl",
+      "Properties": {
+        "OriginAccessControlConfig": {
+          "Name": "leave-management-system-frontend-oac",
+          "OriginAccessControlOriginType": "s3",
+          "SigningBehavior": "always",
+          "SigningProtocol": "sigv4"
+        }
+      }
+    },
+    "FrontendHeaders": {
+      "Type": "AWS::CloudFront::ResponseHeadersPolicy",
+      "Properties": {
+        "ResponseHeadersPolicyConfig": {
+          "Name": "leave-management-system-frontend-headers",
+          "SecurityHeadersConfig": {
+            "ContentTypeOptions": {
+              "Override": true
+            },
+            "FrameOptions": {
+              "FrameOption": "DENY",
+              "Override": true
+            },
+            "ReferrerPolicy": {
+              "ReferrerPolicy": "strict-origin-when-cross-origin",
+              "Override": true
+            },
+            "StrictTransportSecurity": {
+              "AccessControlMaxAgeSec": 31536000,
+              "Override": true
+            },
+            "ContentSecurityPolicy": {
+              "Override": true,
+              "ContentSecurityPolicy": {
+                "Fn::Sub": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.execute-api.${AWS::Region}.amazonaws.com; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+              }
+            }
+          }
+        }
+      }
+    },
+    "FrontendBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "FrontendBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": "*",
+              "Action": "s3:GetObject",
+              "Resource": {
+                "Fn::Sub": "arn:${AWS::Partition}:s3:::${FrontendBucket}/*"
+              },
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "true"
+                }
+              }
+            },
+            {
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${FrontendBucket}"
+                },
+                {
+                  "Fn::Sub": "arn:${AWS::Partition}:s3:::${FrontendBucket}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "BootstrapFunctionLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/leave-management-system-bootstrap-aws",
+        "RetentionInDays": 14
+      }
+    },
+    "BootstrapFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "leave-management-system-bootstrap-aws",
+        "Runtime": "java17.al2023",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Handler": "com.nexturn.lms.aws.SchemaBootstrapHandler::handleRequest",
+        "Role": {
+          "Fn::GetAtt": [
+            "BootstrapRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ArtifactBucket"
+          },
+          "S3Key": "archive-java17-3d4a404dbbf3b1ec.zip"
+        },
+        "Timeout": 180,
+        "MemorySize": 1024,
+        "Environment": {
+          "Variables": {
+            "DB_URL": {
+              "Fn::Sub": "jdbc:mysql://${Database.Endpoint.Address}:${Database.Endpoint.Port}/lms_approval?sslMode=VERIFY_IDENTITY&trustCertificateKeyStoreUrl=file:/var/task/rds-truststore.p12&trustCertificateKeyStoreType=PKCS12&trustCertificateKeyStorePassword=changeit&connectionTimeZone=UTC&connectTimeout=5000&socketTimeout=10000"
+            },
+            "MASTER_USERNAME": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAdminSecret}:SecretString:username}}"
+            },
+            "MASTER_PASSWORD": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAdminSecret}:SecretString:password}}"
+            },
+            "APP_PASSWORD": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAppSecret}:SecretString:password}}"
+            },
+            "INITIAL_MANAGER_PASSWORD": {
+              "Fn::Sub": "{{resolve:secretsmanager:${InitialManagerSecret}:SecretString:password}}"
+            },
+            "JAVA_TOOL_OPTIONS": "-Duser.timezone=UTC",
+            "DEMO_DATA_ENABLED": "true",
+            "DEMO_EMPLOYEE_PASSWORD": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DemoEmployeeSecret}:SecretString:password}}"
+            }
+          }
+        },
+        "VpcConfig": {
+          "SubnetIds": [
+            {
+              "Ref": "SubnetA"
+            },
+            {
+              "Ref": "SubnetB"
+            }
+          ],
+          "SecurityGroupIds": [
+            {
+              "Ref": "LambdaSecurityGroup"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      },
+      "DependsOn": [
+        "BootstrapFunctionLogs",
+        "S3Endpoint"
+      ]
+    },
+    "SchemaInitialization": {
+      "Type": "Custom::LmsSchema",
+      "Properties": {
+        "ServiceToken": {
+          "Fn::GetAtt": [
+            "BootstrapFunction",
+            "Arn"
+          ]
+        },
+        "ServiceTimeout": 240,
+        "SchemaVersion": "2-demo-employee"
+      }
+    },
+    "ApiFunctionLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/leave-management-system-lambda-aws",
+        "RetentionInDays": 14
+      }
+    },
+    "ApiFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "leave-management-system-lambda-aws",
+        "Runtime": "java17.al2023",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Handler": "com.nexturn.lms.StreamLambdaHandler::handleRequest",
+        "Role": {
+          "Fn::GetAtt": [
+            "ApiRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ArtifactBucket"
+          },
+          "S3Key": "backend-828346eb2db07607.zip"
+        },
+        "Timeout": 30,
+        "MemorySize": 1024,
+        "Environment": {
+          "Variables": {
+            "DB_URL": {
+              "Fn::Sub": "jdbc:mysql://${Database.Endpoint.Address}:${Database.Endpoint.Port}/lms_approval?sslMode=VERIFY_IDENTITY&trustCertificateKeyStoreUrl=file:/var/task/rds-truststore.p12&trustCertificateKeyStoreType=PKCS12&trustCertificateKeyStorePassword=changeit&connectionTimeZone=UTC&connectTimeout=5000&socketTimeout=10000"
+            },
+            "DB_USERNAME": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAppSecret}:SecretString:username}}"
+            },
+            "DB_PASSWORD": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAppSecret}:SecretString:password}}"
+            },
+            "JAVA_TOOL_OPTIONS": "-Duser.timezone=UTC",
+            "AWS_EVENTS_ENABLED": "true",
+            "CORS_ORIGINS": {
+              "Fn::Sub": "https://${FrontendBucket}.s3.${AWS::Region}.amazonaws.com,${CorsOrigins}"
+            }
+          }
+        },
+        "VpcConfig": {
+          "SubnetIds": [
+            {
+              "Ref": "SubnetA"
+            },
+            {
+              "Ref": "SubnetB"
+            }
+          ],
+          "SecurityGroupIds": [
+            {
+              "Ref": "LambdaSecurityGroup"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      },
+      "DependsOn": [
+        "ApiFunctionLogs",
+        "SchemaInitialization"
+      ]
+    },
+    "OutboxFunctionLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/leave-management-system-outbox-aws",
+        "RetentionInDays": 14
+      }
+    },
+    "OutboxFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "leave-management-system-outbox-aws",
+        "Runtime": "java17.al2023",
+        "Architectures": [
+          "x86_64"
+        ],
+        "Handler": "com.nexturn.lms.aws.OutboxLambdaHandler::handleRequest",
+        "Role": {
+          "Fn::GetAtt": [
+            "OutboxRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ArtifactBucket"
+          },
+          "S3Key": "backend-828346eb2db07607.zip"
+        },
+        "Timeout": 60,
+        "MemorySize": 512,
+        "Environment": {
+          "Variables": {
+            "DB_URL": {
+              "Fn::Sub": "jdbc:mysql://${Database.Endpoint.Address}:${Database.Endpoint.Port}/lms_approval?sslMode=VERIFY_IDENTITY&trustCertificateKeyStoreUrl=file:/var/task/rds-truststore.p12&trustCertificateKeyStoreType=PKCS12&trustCertificateKeyStorePassword=changeit&connectionTimeZone=UTC&connectTimeout=5000&socketTimeout=10000"
+            },
+            "DB_USERNAME": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAppSecret}:SecretString:username}}"
+            },
+            "DB_PASSWORD": {
+              "Fn::Sub": "{{resolve:secretsmanager:${DatabaseAppSecret}:SecretString:password}}"
+            },
+            "JAVA_TOOL_OPTIONS": "-Duser.timezone=UTC",
+            "NOTIFICATION_TOPIC_ARN": {
+              "Ref": "NotificationTopic"
+            }
+          }
+        },
+        "VpcConfig": {
+          "SubnetIds": [
+            {
+              "Ref": "SubnetA"
+            },
+            {
+              "Ref": "SubnetB"
+            }
+          ],
+          "SecurityGroupIds": [
+            {
+              "Ref": "LambdaSecurityGroup"
+            }
+          ]
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      },
+      "DependsOn": [
+        "OutboxFunctionLogs",
+        "SchemaInitialization",
+        "SnsEndpoint"
+      ]
+    },
+    "OutboxSchedule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "ScheduleExpression": "rate(1 minute)",
+        "State": "ENABLED",
+        "Targets": [
+          {
+            "Id": "PublishCommittedEvents",
+            "Arn": {
+              "Fn::GetAtt": [
+                "OutboxFunction",
+                "Arn"
+              ]
+            },
+            "RetryPolicy": {
+              "MaximumRetryAttempts": 2,
+              "MaximumEventAgeInSeconds": 300
+            }
+          }
+        ]
+      }
+    },
+    "SchedulePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "FunctionName": {
+          "Ref": "OutboxFunction"
+        },
+        "Principal": "events.amazonaws.com",
+        "SourceArn": {
+          "Fn::GetAtt": [
+            "OutboxSchedule",
+            "Arn"
+          ]
+        },
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        }
+      }
+    },
+    "ArchiveFunctionLogs": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/leave-management-system-archive-aws",
+        "RetentionInDays": 14
+      }
+    },
+    "ArchiveFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "FunctionName": "leave-management-system-archive-aws",
+        "Runtime": "java17.al2023",
+        "Handler": "com.nexturn.lms.aws.ArchiveLambdaHandler::handleRequest",
+        "Role": {
+          "Fn::GetAtt": [
+            "ArchiveRole",
+            "Arn"
+          ]
+        },
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ArtifactBucket"
+          },
+          "S3Key": "archive-java17-3d4a404dbbf3b1ec.zip"
+        },
+        "Timeout": 30,
+        "MemorySize": 512,
+        "Environment": {
+          "Variables": {
+            "ARCHIVE_BUCKET": {
+              "Ref": "ArtifactBucket"
+            },
+            "JAVA_TOOL_OPTIONS": "-Duser.timezone=UTC"
+          }
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          },
+          {
+            "Key": "ManagedBy",
+            "Value": "CloudFormation"
+          }
+        ]
+      },
+      "DependsOn": "ArchiveFunctionLogs"
+    },
+    "ArchiveQueueTrigger": {
+      "Type": "AWS::Lambda::EventSourceMapping",
+      "Properties": {
+        "EventSourceArn": {
+          "Fn::GetAtt": [
+            "EventQueue",
+            "Arn"
+          ]
+        },
+        "FunctionName": {
+          "Ref": "ArchiveFunction"
+        },
+        "BatchSize": 10,
+        "Enabled": true,
+        "ScalingConfig": {
+          "MaximumConcurrency": 2
+        }
+      }
+    },
+    "RestApi": {
+      "Type": "AWS::ApiGateway::RestApi",
+      "Properties": {
+        "Name": "leave-management-system-api-aws",
+        "EndpointConfiguration": {
+          "Types": [
+            "REGIONAL"
+          ]
+        },
+        "Body": {
+          "swagger": "2.0",
+          "info": {
+            "title": "LMS Member 3 API",
+            "version": "1.0"
+          },
+          "schemes": [
+            "https"
+          ],
+          "paths": {
+            "/{proxy+}": {
+              "x-amazon-apigateway-any-method": {
+                "parameters": [
+                  {
+                    "name": "proxy",
+                    "in": "path",
+                    "required": true,
+                    "type": "string"
+                  }
+                ],
+                "responses": {
+                  "200": {
+                    "description": "Backend response"
+                  }
+                },
+                "x-amazon-apigateway-integration": {
+                  "type": "aws_proxy",
+                  "httpMethod": "POST",
+                  "uri": {
+                    "Fn::Sub": "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ApiFunction.Arn}/invocations"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "ApiDeployment": {
+      "Type": "AWS::ApiGateway::Deployment",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "RestApi"
+        }
+      }
+    },
+    "ApiStage": {
+      "Type": "AWS::ApiGateway::Stage",
+      "Properties": {
+        "RestApiId": {
+          "Ref": "RestApi"
+        },
+        "DeploymentId": {
+          "Ref": "ApiDeployment"
+        },
+        "StageName": "stage1",
+        "MethodSettings": [
+          {
+            "ResourcePath": "/*",
+            "HttpMethod": "*",
+            "ThrottlingRateLimit": 5,
+            "ThrottlingBurstLimit": 10
+          }
+        ]
+      }
+    },
+    "GatewayPermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "ApiFunction"
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        },
+        "SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${RestApi}/*/*/*"
+        }
+      }
+    },
+    "DemoEmployeeSecret": {
+      "Type": "AWS::SecretsManager::Secret",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Name": "leave-management-system-demo-employee-aws",
+        "Description": "Synthetic demo employee login, employee ID 900100, assigned to manager 100",
+        "GenerateSecretString": {
+          "SecretStringTemplate": "{\"username\":\"employee.demo\"}",
+          "GenerateStringKey": "password",
+          "PasswordLength": 32,
+          "ExcludePunctuation": true
+        },
+        "Tags": [
+          {
+            "Key": "Project",
+            "Value": "leave-management-system-aws"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ApiBaseUrl": {
+      "Value": {
+        "Fn::Sub": "https://${RestApi}.execute-api.${AWS::Region}.amazonaws.com/stage1"
+      }
+    },
+    "FrontendUrl": {
+      "Value": {
+        "Fn::Sub": "https://${FrontendBucket}.s3.${AWS::Region}.amazonaws.com/index.html"
+      }
+    },
+    "FrontendBucketName": {
+      "Value": {
+        "Ref": "FrontendBucket"
+      }
+    },
+    "LambdaFunctionName": {
+      "Value": {
+        "Ref": "ApiFunction"
+      }
+    },
+    "RdsEndpoint": {
+      "Value": {
+        "Fn::GetAtt": [
+          "Database",
+          "Endpoint.Address"
+        ]
+      }
+    },
+    "RdsInstanceName": {
+      "Value": {
+        "Ref": "Database"
+      }
+    },
+    "NotificationTopicArn": {
+      "Value": {
+        "Ref": "NotificationTopic"
+      }
+    },
+    "QueueUrl": {
+      "Value": {
+        "Ref": "EventQueue"
+      }
+    },
+    "DeadLetterQueueUrl": {
+      "Value": {
+        "Ref": "DeadLetterQueue"
+      }
+    },
+    "S3Bucket": {
+      "Value": {
+        "Ref": "ArtifactBucket"
+      }
+    },
+    "InitialManagerSecretArn": {
+      "Value": {
+        "Ref": "InitialManagerSecret"
+      },
+      "Description": "Privately retrieve the manager login in Secrets Manager; do not expose its secret value"
+    },
+    "ApplicationDatabaseSecretArn": {
+      "Value": {
+        "Ref": "DatabaseAppSecret"
+      }
+    },
+    "DemoEmployeeSecretArn": {
+      "Value": {
+        "Ref": "DemoEmployeeSecret"
+      },
+      "Description": "Retrieve the synthetic demo employee login privately in Secrets Manager"
+    }
+  }
+}
