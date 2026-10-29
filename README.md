@@ -137,3 +137,7 @@ Use Node 22.12+ and run `npm ci` followed by `npm run build` inside `frontend/`.
 ## Deployed application
 
 [Open frontend](https://leave-management-system-frontend-773384831067-ap-south-1.s3.ap-south-1.amazonaws.com/index.html) · [API health](https://96h1em86gl.execute-api.ap-south-1.amazonaws.com/stage1/ping). Main Lambda runs Java 17; API stage is `stage1`. See `deployment/STATUS.md` for verified deployment details and private login retrieval instructions.
+
+## Demo login and PDF guide
+
+All four Lambda functions now use Java 17. The approved synthetic employee login is `employee.demo` (ID 900100); retrieve its generated password privately from `leave-management-system-demo-employee-aws` in Secrets Manager. It reports to manager 100 and has one two-day pending request with a 20-day starting balance. See docs/Leave-Management-System-AWS-Guide.pdf and import docs/Leave-Management-AWS.postman_collection.json for the complete guide and request collection.

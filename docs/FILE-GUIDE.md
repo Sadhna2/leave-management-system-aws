@@ -71,4 +71,8 @@ Only Member 3 and required infrastructure/authentication support are included.
 | `frontend/src/pages/Login.jsx` | Adapts the original split-screen login to authenticated bearer tokens and explicit employee identity. |
 | `frontend/src/pages/Notifications.jsx` | Reuses the original notification list with owned-record pagination and mark-as-read support. |
 
-Other documented configuration: pom.xml, template.yml (existing-database alternative), src/assembly/bin.xml, database/schema.sql, optional database/local-fixture.sql, application.properties, application-test.properties, frontend/package.json, frontend/vite.config.js, frontend/public/config.json, deployment/cloudformation.json, deployment/archive_worker.py and deployment/README.md.
+Other documented configuration: pom.xml, template.yml (existing-database alternative), src/assembly/bin.xml, database/schema.sql, optional database/local-fixture.sql, application.properties, application-test.properties, frontend/package.json, frontend/vite.config.js, frontend/public/config.json, deployment/cloudformation.json, src/main/java/com/nexturn/lms/aws/ArchiveLambdaHandler.java and deployment/README.md.
+
+## Final Java 17 and demo update
+
+The archive worker now uses Java 17 (`ArchiveLambdaHandler`) with its existing scoped SQS/S3 role. The Python implementation was removed. A generated demo credential is in Secrets Manager as `leave-management-system-demo-employee-aws`; username `employee.demo`, employee ID 900100, assigned to manager 100. Schema version `2-demo-employee` seeds one labelled two-day pending leave and a 20-day balance idempotently. See deployment/STATUS.md and docs/Leave-Management-System-AWS-Guide.pdf for the final verified setup.

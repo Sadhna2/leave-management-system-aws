@@ -22,3 +22,7 @@ The Lambda ZIP is `backend-828346eb2db07607.zip`: 56,063,585 compressed bytes an
 The complete CloudFormation template passed `cfn-lint` for ap-south-1 with no errors or warnings, and AWS accepted its template-summary validation. The API stage is **stage1**. Actual resource creation and deployed API/frontend checks are tracked separately in `deployment/STATUS.md`.
 
 The opt-in `RestrictedMySqlSmokeTest` is restricted to localhost URLs and requires `MYSQL_RESTRICTED_URL`, `MYSQL_RESTRICTED_PASSWORD` and `MYSQL_RESTRICTED_MANAGER_PASSWORD`. It expects the disposable local fixture initialized with `lms_app` and manager 100. Do not point local test fixtures at production data.
+
+## Final archive/demo update
+
+31 enabled tests passed on Java 17; two optional MySQL tests were skipped in this final build. ArchiveLambdaHandlerTest adds five local SDK HTTP tests. The updated initializer passed a separate double-run against isolated MySQL, verifying demo BCrypt authentication, manager assignment, one pending request and a 20-day balance. Deployed manager and employee logins passed; request 1 remains pending. A post-migration SNS event reached S3 through the Java 17 archive function. The new ZIP contains 50 application classes, all major version 61.

@@ -14,6 +14,15 @@
   "artifactAndArchiveBucket": "leave-management-system-aws-773384831067-ap-south-1",
   "snsTopicArn": "arn:aws:sns:ap-south-1:773384831067:leave-management-system-notifications-aws",
   "queueUrl": "https://sqs.ap-south-1.amazonaws.com/773384831067/leave-management-system-events-aws",
-  "pipelineTestEventId": "7b3e5a41-0aca-4c59-91a5-7c8cfa991002",
-  "oldRdsDeletion": "Confirmed deleted without final snapshot or retained automated backups"
+  "pipelineTestEventId": "61e30776-d835-4d80-8c1f-e91bd7da1700",
+  "oldRdsDeletion": "Confirmed deleted without final snapshot or retained automated backups",
+  "allLambdaRuntimes": "java17.al2023",
+  "archiveCodeKey": "archive-java17-3d4a404dbbf3b1ec.zip",
+  "templateKey": "cloudformation-all-java17-3d4a404dbbf3b1ec.json",
+  "demoEmployeeUsername": "employee.demo",
+  "demoEmployeeId": 900100,
+  "demoLeaveId": 1,
+  "demoLeaveStatus": "PENDING",
+  "demoEmployeeSecretArn": "arn:aws:secretsmanager:ap-south-1:773384831067:secret:leave-management-system-demo-employee-aws-QMANEL",
+  "oldLambdaDeletion": "next26_aws_function confirmed deleted"
 }

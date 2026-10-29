@@ -39,3 +39,7 @@ The first stack rolled back at the VPC quota. After explicit confirmation, unuse
 AWS requires account verification before creating a CloudFront distribution. The user approved serving only compiled frontend files through S3 HTTPS instead. The template permits anonymous `s3:GetObject` over TLS in the separate frontend bucket; it grants no listing or write access. Backend ZIPs, audit archives and RDS remain private. The account also rejected seven-day backup retention, so the new RDS instance requests one day. Unused CloudFront response headers and origin access control remain harmless stack resources, without a distribution.
 
 Current recovery template: `cloudformation-java17-stage1-s3-https.json` in the artifact bucket. `cloudformation.json` in this directory matches it. The stack reuses retained credentials through ARN parameters, without printing secret values. See `STATUS.md` for the latest verified cloud state; a submitted update is not proof of a working application.
+
+## Final Java 17 and demo update
+
+The archive worker now uses Java 17 (`ArchiveLambdaHandler`) with its existing scoped SQS/S3 role. The Python implementation was removed. A generated demo credential is in Secrets Manager as `leave-management-system-demo-employee-aws`; username `employee.demo`, employee ID 900100, assigned to manager 100. Schema version `2-demo-employee` seeds one labelled two-day pending leave and a 20-day balance idempotently. See deployment/STATUS.md and docs/Leave-Management-System-AWS-Guide.pdf for the final verified setup.

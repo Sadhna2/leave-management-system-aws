@@ -1,0 +1,309 @@
+{
+  "info": {
+    "name": "Leave Management - Member 3 AWS",
+    "_postman_id": "37daebf4-0991-4d8c-b054-0f537ff644c1",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Send requests individually. Approve/reject modify the demo data. Do not run the whole collection as a batch. Passwords are intentionally blank; fill only locally and do not share exported secrets."
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://96h1em86gl.execute-api.ap-south-1.amazonaws.com/stage1",
+      "type": "string"
+    },
+    {
+      "key": "managerPassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "employeePassword",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "employeeId",
+      "value": "900100",
+      "type": "string"
+    },
+    {
+      "key": "leaveId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "notificationId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/ping",
+        "description": "",
+        "auth": {
+          "type": "noauth"
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Healthy\", () => pm.response.to.have.status(200));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Manager login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/auth/login",
+        "description": "Set managerPassword locally from the manager Secrets Manager secret. Saves the resulting manager token.",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"manager\",\n  \"password\": \"{{managerPassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  pm.collectionVariables.set(\"accessToken\", pm.response.json().accessToken);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Current identity",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/auth/me",
+        "description": ""
+      }
+    },
+    {
+      "name": "04 Assigned pending leaves",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/manager/leaves/pending?page=0&size=20",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const data = pm.response.json();",
+              "  const leave = (data.content || []).find(row => row.empId === 900100);",
+              "  if (leave) pm.collectionVariables.set(\"leaveId\", String(leave.leaveId));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Approve demo leave - changes data",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/manager/leave/{{leaveId}}/approve",
+        "description": "Use the manager token and a pending assigned leave ID. Deducts two demo days. Send individually.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"comment\": \"Approved demo leave after review\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "06 Reject another pending leave - changes data",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/manager/leave/{{leaveId}}/reject",
+        "description": "Choose a different assigned PENDING leave. The approved demo leave cannot also be rejected.",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"comment\": \"Rejected after review\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "07 Manager views demo employee audit",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/audit-logs/employee/{{employeeId}}?page=0&size=20",
+        "description": ""
+      }
+    },
+    {
+      "name": "08 Demo employee login",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/api/auth/login",
+        "description": "Set employeePassword locally from leave-management-system-demo-employee-aws. Replaces accessToken with the employee token.",
+        "auth": {
+          "type": "noauth"
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"username\": \"employee.demo\",\n  \"password\": \"{{employeePassword}}\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"Login succeeds\", () => pm.response.to.have.status(200));",
+              "if (pm.response.code === 200) {",
+              "  pm.collectionVariables.set(\"accessToken\", pm.response.json().accessToken);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Employee notifications",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/notifications?page=0&size=20",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if (pm.response.code === 200) {",
+              "  const rows = pm.response.json().content || [];",
+              "  if (rows.length) pm.collectionVariables.set(\"notificationId\", String(rows[0].notificationId));",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Mark owned notification read",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "url": "{{baseUrl}}/api/notifications/{{notificationId}}/read",
+        "description": ""
+      }
+    },
+    {
+      "name": "11 Employee own audit",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/api/audit-logs/employee/{{employeeId}}?page=0&size=20",
+        "description": ""
+      }
+    },
+    {
+      "name": "12 Logout",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": "{{baseUrl}}/api/auth/logout",
+        "description": ""
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set(\"accessToken\", \"\");"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
